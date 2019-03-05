@@ -23,7 +23,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var logLevel string
+var (
+	logLevel string
+	amiID    string
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{

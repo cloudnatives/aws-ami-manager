@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"errors"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -9,8 +10,8 @@ import (
 )
 
 var (
-	AWSConfigurationManager *ConfigurationManager
-	ec2Services             = make(map[string]map[string]*ec2.EC2)
+	ConfigManager *ConfigurationManager
+	ec2Services   = make(map[string]map[string]*ec2.EC2)
 )
 
 func getEC2ServiceForAccountAndRegion(account string, region string) *ec2.EC2 {
@@ -19,7 +20,7 @@ func getEC2ServiceForAccountAndRegion(account string, region string) *ec2.EC2 {
 	}
 
 	if ec2Services[account][region] == nil {
-		ec2Services[account][region] = ec2.New(AWSConfigurationManager.getConfigurationForAccountAndRegion(account, region))
+		ec2Services[account][region] = ec2.New(ConfigManager.getConfigurationForAccountAndRegion(account, region))
 	}
 	return ec2Services[account][region]
 }
@@ -34,7 +35,13 @@ type Ami struct {
 	AmisPerRegion map[string]*Ami
 }
 
-func NewAmi(sourceAmiID *string, sourceRegion *string, regions *[]string) Ami {
+func NewAmi(sourceAmiID *string) Ami {
+	return Ami{
+		SourceAmiID: sourceAmiID,
+	}
+}
+
+func NewAmiWithRegions(sourceAmiID *string, sourceRegion *string, regions *[]string) Ami {
 	ami := Ami{
 		SourceAmiID:   sourceAmiID,
 		SourceRegion:  sourceRegion,
@@ -46,7 +53,7 @@ func NewAmi(sourceAmiID *string, sourceRegion *string, regions *[]string) Ami {
 
 func (ami *Ami) fetchMetadata() {
 	log.Debug("Fetching metadata about the AMI")
-	ec2svc := getEC2ServiceForAccountAndRegion(*AWSConfigurationManager.defaultAccountID, *ami.SourceRegion)
+	ec2svc := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ami.SourceRegion)
 
 	var amiList []string
 	amiList = append(amiList, *ami.SourceAmiID)
@@ -101,7 +108,7 @@ func (ami *Ami) Copy() {
 				log.Fatal(err)
 			}
 
-			err = relatedAmi.setOwners(AWSConfigurationManager.accounts)
+			err = relatedAmi.setOwners(ConfigManager.accounts)
 
 			if err != nil {
 				log.Fatal(err)
@@ -110,8 +117,8 @@ func (ami *Ami) Copy() {
 			relatedAmi = ami
 		}
 
-		for _, account := range AWSConfigurationManager.getAccounts() {
-			if account != *AWSConfigurationManager.defaultAccountID {
+		for _, account := range ConfigManager.getAccounts() {
+			if account != *ConfigManager.defaultAccountID {
 				err := relatedAmi.setTagsForAccount(account, *ami.SourceAmiTags)
 
 				if err != nil {
@@ -131,7 +138,7 @@ func (ami *Ami) copyToRegion(region string) (*Ami, error) {
 		SourceRegion:  ami.SourceRegion,
 		SourceImageId: ami.SourceAmiID,
 	}
-	ec2Service := getEC2ServiceForAccountAndRegion(*AWSConfigurationManager.defaultAccountID, *relatedAmi.SourceRegion)
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *relatedAmi.SourceRegion)
 
 	copyImageRequest := ec2Service.CopyImageRequest(copyImageInput)
 
@@ -167,7 +174,7 @@ func (ami *Ami) copyToRegion(region string) (*Ami, error) {
 
 func (ami *Ami) setOwners(owners []string) error {
 	log.Infof("Setting owners to AMI %s", *ami.SourceAmiID)
-	ec2Service := getEC2ServiceForAccountAndRegion(*AWSConfigurationManager.defaultAccountID, *ami.SourceRegion)
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ami.SourceRegion)
 
 	modifyImageAttributeInput := &ec2.ModifyImageAttributeInput{
 		ImageId: ami.SourceAmiID,
@@ -224,4 +231,54 @@ func createLaunchPermissionsForOwners(owners []string) []ec2.LaunchPermission {
 		})
 	}
 	return launchPermissions
+}
+
+func (ami *Ami) RemoveAmi() error {
+	// describe ami
+	ami.fetchMetadata()
+
+	// deregister ami
+	deregisterAmiInput := &ec2.DeregisterImageInput{
+		ImageId: ami.SourceAmiID,
+	}
+
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ConfigManager.GetDefaultRegion())
+	_, err := ec2Service.DeregisterImageRequest(deregisterAmiInput).Send()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// delete snapshot
+	snapshotIDs, err := ami.getSnapshotIDs()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, snapshotID := range snapshotIDs {
+		deleteSnapshotInput := &ec2.DeleteSnapshotInput{
+			SnapshotId: snapshotID,
+		}
+
+		_, err := ec2Service.DeleteSnapshotRequest(deleteSnapshotInput).Send()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (ami *Ami) getSnapshotIDs() ([]*string, error) {
+	var snapshotIDs []*string
+	if ami.AWSImage != nil {
+		for _, mapping := range ami.AWSImage.BlockDeviceMappings {
+			snapshotIDs = append(snapshotIDs, mapping.Ebs.SnapshotId)
+		}
+
+		return snapshotIDs, nil
+	}
+	return nil, errors.New("no snapshots found")
 }

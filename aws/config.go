@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	ProfileString  string = "AWS_PROFILE"
-	defaultProfile string = "default"
+	ProfileString string = "AWS_PROFILE"
 )
 
 func SetLogLevel(level string) {
