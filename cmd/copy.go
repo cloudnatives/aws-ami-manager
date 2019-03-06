@@ -66,5 +66,5 @@ func init() {
 }
 
 func loadAWSConfigForProfiles() {
-	aws.ConfigManager = aws.NewConfigurationManager(regions, accounts)
+	aws.ConfigManager = aws.NewConfigurationManagerForRegionsAndAccounts(regions, accounts)
 }

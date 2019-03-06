@@ -37,7 +37,13 @@ type ConfigurationManager struct {
 	stsService *sts.STS
 }
 
-func NewConfigurationManager(regions []string, accounts []string) *ConfigurationManager {
+func NewConfigurationManager() *ConfigurationManager {
+	cm := &ConfigurationManager{}
+	cm.setDefaults()
+
+	return cm
+}
+func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []string) *ConfigurationManager {
 	cm := &ConfigurationManager{
 		regions:  regions,
 		accounts: accounts,

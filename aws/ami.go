@@ -2,6 +2,7 @@ package aws
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -51,7 +52,7 @@ func NewAmiWithRegions(sourceAmiID *string, sourceRegion *string, regions *[]str
 	return ami
 }
 
-func (ami *Ami) fetchMetadata() {
+func (ami *Ami) fetchMetadata() error {
 	log.Debug("Fetching metadata about the AMI")
 	ec2svc := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ami.SourceRegion)
 
@@ -65,13 +66,13 @@ func (ami *Ami) fetchMetadata() {
 	result, err := request.Send()
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	images := result.Images
 
-	if len(images) != 1 {
-		log.Fatal("Invalid number of AMI ID's returned for AMI: %s", *ami.SourceAmiID)
+	if len(images) < 1 {
+		return errors.New(fmt.Sprintf("no ami found with id %s", *ami.SourceAmiID))
 	}
 
 	ami.AWSImage = &images[0]
@@ -87,11 +88,17 @@ func (ami *Ami) fetchMetadata() {
 		ami.SourceAmiTags = &images[0].Tags
 		log.Debugf("AMI tags: %s", ami.SourceAmiTags)
 	}
+
+	return nil
 }
 
 func (ami *Ami) Copy() {
 	// Fetch name and tags for the source AMI
-	ami.fetchMetadata()
+	err := ami.fetchMetadata()
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// in this loop region is the key
 	for region := range ami.AmisPerRegion {
@@ -235,7 +242,11 @@ func createLaunchPermissionsForOwners(owners []string) []ec2.LaunchPermission {
 
 func (ami *Ami) RemoveAmi() error {
 	// describe ami
-	ami.fetchMetadata()
+	err := ami.fetchMetadata()
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// deregister ami
 	deregisterAmiInput := &ec2.DeregisterImageInput{
@@ -243,11 +254,13 @@ func (ami *Ami) RemoveAmi() error {
 	}
 
 	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ConfigManager.GetDefaultRegion())
-	_, err := ec2Service.DeregisterImageRequest(deregisterAmiInput).Send()
+	_, err = ec2Service.DeregisterImageRequest(deregisterAmiInput).Send()
 
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Debug("AMI is de-registered.")
 
 	// delete snapshot
 	snapshotIDs, err := ami.getSnapshotIDs()
@@ -267,6 +280,8 @@ func (ami *Ami) RemoveAmi() error {
 			return err
 		}
 	}
+
+	log.Debug("Snapshots have been deleted.")
 
 	return nil
 }

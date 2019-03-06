@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"github.com/cloudnatives/aws-ami-manager/aws"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -35,8 +36,20 @@ to quickly create a Cobra application.`,
 }
 
 func runRemove() {
+	cm := aws.NewConfigurationManager()
+
 	ami := aws.NewAmi(&amiID)
-	_ = ami.RemoveAmi()
+	ami.SourceRegion = cm.GetDefaultRegion()
+
+	aws.ConfigManager = cm
+
+	err := ami.RemoveAmi()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Infof("AMI %s has been removed successfully", *ami.SourceAmiID)
 }
 
 func init() {
