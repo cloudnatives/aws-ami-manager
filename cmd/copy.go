@@ -31,8 +31,9 @@ var (
 var copyCmd = &cobra.Command{
 	Use:   "copy",
 	Short: "Copies an AMI to a list of AWS regions and accounts",
-	Long: `
-		
+	Long: `Copies an AMI to a list of AWS regions and accounts.
+
+E.g. aws-ami-manager copy --amiID=ami-0e38977fc6310ea8b --regions=eu-west-1,eu-central-1 --accounts=123456789,987654321,192837465
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runCopy()

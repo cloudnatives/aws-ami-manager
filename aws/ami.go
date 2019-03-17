@@ -100,6 +100,9 @@ func (ami *Ami) Copy() {
 		log.Fatal(err)
 	}
 
+	done := make(chan bool)
+	defer close(done)
+
 	// in this loop region is the key
 	for region := range ami.AmisPerRegion {
 		var (
@@ -107,32 +110,38 @@ func (ami *Ami) Copy() {
 			err        error
 		)
 
-		// We obviously don't have to copy the AMI to a region where it already exists
-		if region != *ami.SourceRegion {
-			relatedAmi, err = ami.copyToRegion(region)
-
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			err = relatedAmi.setOwners(ConfigManager.accounts)
-
-			if err != nil {
-				log.Fatal(err)
-			}
-		} else {
-			relatedAmi = ami
-		}
-
-		for _, account := range ConfigManager.getAccounts() {
-			if account != *ConfigManager.defaultAccountID {
-				err := relatedAmi.setTagsForAccount(account, *ami.SourceAmiTags)
+		go func() {
+			// We obviously don't have to copy the AMI to a region where it already exists
+			if region != *ami.SourceRegion {
+				relatedAmi, err = ami.copyToRegion(region)
 
 				if err != nil {
 					log.Fatal(err)
 				}
+
+				err = relatedAmi.setOwners(ConfigManager.accounts)
+
+				if err != nil {
+					log.Fatal(err)
+				}
+			} else {
+				relatedAmi = ami
 			}
-		}
+
+			for _, account := range ConfigManager.getAccounts() {
+				if account != *ConfigManager.defaultAccountID {
+					err := relatedAmi.setTagsForAccount(account, *ami.SourceAmiTags)
+
+					if err != nil {
+						log.Fatal(err)
+					}
+				}
+			}
+
+			done <- true
+		}()
+
+		<-done
 	}
 }
 
