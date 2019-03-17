@@ -46,7 +46,7 @@ func runCopy() {
 
 	loadAWSConfigForProfiles()
 
-	ami := aws.NewAmiWithRegions(&amiID, aws.ConfigManager.GetDefaultRegion(), &regions)
+	ami := aws.NewAmiWithRegions(amiID, aws.ConfigManager.GetDefaultRegion(), regions)
 	ami.Copy()
 
 	elapsed := time.Since(start)

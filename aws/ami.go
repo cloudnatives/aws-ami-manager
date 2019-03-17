@@ -3,6 +3,7 @@ package aws
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -16,6 +17,7 @@ var (
 )
 
 func getEC2ServiceForAccountAndRegion(account string, region string) *ec2.EC2 {
+	log.Debugf("getEC2ServiceForAccountAndRegion: account %s, region %s", account, region)
 	if ec2Services[account] == nil {
 		ec2Services[account] = make(map[string]*ec2.EC2)
 	}
@@ -27,26 +29,26 @@ func getEC2ServiceForAccountAndRegion(account string, region string) *ec2.EC2 {
 }
 
 type Ami struct {
-	SourceAmiID   *string
-	SourceRegion  *string
-	SourceAmiName *string
+	SourceAmiID   string
+	SourceRegion  string
+	SourceAmiName string
 	SourceAmiTags *[]ec2.Tag
 	AWSImage      *ec2.Image
 
 	AmisPerRegion map[string]*Ami
 }
 
-func NewAmi(sourceAmiID *string) Ami {
-	return Ami{
+func NewAmi(sourceAmiID string) *Ami {
+	return &Ami{
 		SourceAmiID: sourceAmiID,
 	}
 }
 
-func NewAmiWithRegions(sourceAmiID *string, sourceRegion *string, regions *[]string) Ami {
-	ami := Ami{
+func NewAmiWithRegions(sourceAmiID string, sourceRegion string, regions []string) *Ami {
+	ami := &Ami{
 		SourceAmiID:   sourceAmiID,
 		SourceRegion:  sourceRegion,
-		AmisPerRegion: convertRegionSliceToAmi(*regions),
+		AmisPerRegion: convertRegionSliceToAmi(regions),
 	}
 
 	return ami
@@ -54,10 +56,10 @@ func NewAmiWithRegions(sourceAmiID *string, sourceRegion *string, regions *[]str
 
 func (ami *Ami) fetchMetadata() error {
 	log.Debug("Fetching metadata about the AMI")
-	ec2svc := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ami.SourceRegion)
+	ec2svc := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, ami.SourceRegion)
 
 	var amiList []string
-	amiList = append(amiList, *ami.SourceAmiID)
+	amiList = append(amiList, ami.SourceAmiID)
 
 	describeImagesInput := ec2.DescribeImagesInput{
 		ImageIds: amiList,
@@ -72,16 +74,16 @@ func (ami *Ami) fetchMetadata() error {
 	images := result.Images
 
 	if len(images) < 1 {
-		return errors.New(fmt.Sprintf("no ami found with id %s", *ami.SourceAmiID))
+		return errors.New(fmt.Sprintf("no ami found with id %s", ami.SourceAmiID))
 	}
 
 	ami.AWSImage = &images[0]
 
 	// With newly copied AMI's name and tags can still be empty, causing nil references
 	// And only set name and tags when not yet already set
-	if ami.SourceAmiName == nil && ami.AWSImage.Name != nil {
-		ami.SourceAmiName = ami.AWSImage.Name
-		log.Debugf("AMI name: %s", *ami.SourceAmiName)
+	if ami.SourceAmiName == "" && ami.AWSImage.Name != nil {
+		ami.SourceAmiName = *ami.AWSImage.Name
+		log.Debugf("AMI name: %s", ami.SourceAmiName)
 	}
 
 	if ami.SourceAmiTags == nil && images[0].Tags != nil {
@@ -100,20 +102,24 @@ func (ami *Ami) Copy() {
 		log.Fatal(err)
 	}
 
-	done := make(chan bool)
-	defer close(done)
+	var wg sync.WaitGroup
 
 	// in this loop region is the key
 	for region := range ami.AmisPerRegion {
-		var (
-			relatedAmi *Ami
-			err        error
-		)
+		log.Debugf("Region is %s", region)
 
-		go func() {
+		wg.Add(1)
+		go func(amiF *Ami, region string) {
+			var (
+				relatedAmi *Ami
+				err        error
+			)
+
 			// We obviously don't have to copy the AMI to a region where it already exists
-			if region != *ami.SourceRegion {
-				relatedAmi, err = ami.copyToRegion(region)
+			if region != amiF.SourceRegion {
+				log.Debug("Starting copying")
+
+				relatedAmi, err = amiF.copyToRegion(region)
 
 				if err != nil {
 					log.Fatal(err)
@@ -125,12 +131,13 @@ func (ami *Ami) Copy() {
 					log.Fatal(err)
 				}
 			} else {
-				relatedAmi = ami
+				relatedAmi = amiF
 			}
 
 			for _, account := range ConfigManager.getAccounts() {
+				// the original AMI already has the tags
 				if account != *ConfigManager.defaultAccountID {
-					err := relatedAmi.setTagsForAccount(account, *ami.SourceAmiTags)
+					err := relatedAmi.setTagsForAccount(account, *amiF.SourceAmiTags)
 
 					if err != nil {
 						log.Fatal(err)
@@ -138,47 +145,47 @@ func (ami *Ami) Copy() {
 				}
 			}
 
-			done <- true
-		}()
-
-		<-done
+			wg.Done()
+		}(ami, region)
 	}
+
+	wg.Wait()
 }
 
 func (ami *Ami) copyToRegion(region string) (*Ami, error) {
 	relatedAmi := ami.AmisPerRegion[region]
 
-	log.Infof("Copying AMI to region %s", *relatedAmi.SourceRegion)
+	log.Infof("Copying AMI to region %s", relatedAmi.SourceRegion)
 	copyImageInput := &ec2.CopyImageInput{
-		Name:          ami.SourceAmiName,
-		SourceRegion:  ami.SourceRegion,
-		SourceImageId: ami.SourceAmiID,
+		Name:          aws.String(ami.SourceAmiName),
+		SourceRegion:  aws.String(ami.SourceRegion),
+		SourceImageId: aws.String(ami.SourceAmiID),
 	}
-	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *relatedAmi.SourceRegion)
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, relatedAmi.SourceRegion)
 
 	copyImageRequest := ec2Service.CopyImageRequest(copyImageInput)
-
 	output, err := copyImageRequest.Send()
 
 	if err != nil {
+		log.Debug(err)
 		return nil, err
 	}
 	log.Infof("New AMI ID: %s", *output.ImageId)
-	relatedAmi.SourceAmiID = output.ImageId
+	relatedAmi.SourceAmiID = *output.ImageId
 
 	// Wait until AMI is `available`
 	duration, _ := time.ParseDuration("5s")
 	start := time.Now()
 
 	for {
-		relatedAmi.fetchMetadata()
+		_ = relatedAmi.fetchMetadata()
 
 		if relatedAmi.isAvailable() == true {
-			log.Infof("AMI %s is available.", *relatedAmi.SourceAmiID)
+			log.Infof("AMI %s is available.", relatedAmi.SourceAmiID)
 			break
 		}
 
-		log.Infof("AMI %s is not available yet. Waiting %f seconds.", *relatedAmi.SourceAmiID, duration.Seconds())
+		log.Infof("AMI %s is not available yet. Waiting %f seconds.", relatedAmi.SourceAmiID, duration.Seconds())
 		time.Sleep(duration)
 	}
 
@@ -189,11 +196,12 @@ func (ami *Ami) copyToRegion(region string) (*Ami, error) {
 }
 
 func (ami *Ami) setOwners(owners []string) error {
-	log.Infof("Setting owners to AMI %s", *ami.SourceAmiID)
-	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ami.SourceRegion)
+	log.Infof("Setting owners to AMI %s", ami.SourceAmiID)
+	log.Debugf("Fetching EC2 service for region: %s", ami.SourceRegion)
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, ami.SourceRegion)
 
 	modifyImageAttributeInput := &ec2.ModifyImageAttributeInput{
-		ImageId: ami.SourceAmiID,
+		ImageId: aws.String(ami.SourceAmiID),
 		LaunchPermission: &ec2.LaunchPermissionModifications{
 			Add: createLaunchPermissionsForOwners(owners),
 		},
@@ -202,12 +210,14 @@ func (ami *Ami) setOwners(owners []string) error {
 	modifyImageAttributeRequest := ec2Service.ModifyImageAttributeRequest(modifyImageAttributeInput)
 	_, err := modifyImageAttributeRequest.Send()
 
+	log.Debugf("Owners set for AMI %s", ami.SourceAmiID)
+
 	return err
 }
 
 func (ami *Ami) isAvailable() bool {
 	if ami.AWSImage == nil {
-		ami.fetchMetadata()
+		_ = ami.fetchMetadata()
 	}
 
 	log.Debugf("Current AMI state is %s", ami.AWSImage.State)
@@ -216,10 +226,11 @@ func (ami *Ami) isAvailable() bool {
 
 func (ami *Ami) setTagsForAccount(account string, tags []ec2.Tag) error {
 	log.Infof("Setting tags for account %s", account)
-	ec2service := getEC2ServiceForAccountAndRegion(account, *ami.SourceRegion)
+	log.Debug(ami)
+	ec2service := getEC2ServiceForAccountAndRegion(account, ami.SourceRegion)
 
 	input := &ec2.CreateTagsInput{
-		Resources: []string{*ami.SourceAmiID},
+		Resources: []string{ami.SourceAmiID},
 		Tags:      tags,
 	}
 
@@ -233,7 +244,8 @@ func convertRegionSliceToAmi(slice []string) map[string]*Ami {
 	amis := make(map[string]*Ami)
 
 	for _, region := range slice {
-		amis[region] = &Ami{SourceRegion: &region}
+		ami := &Ami{SourceRegion: region}
+		amis[region] = ami
 	}
 
 	return amis
@@ -259,10 +271,10 @@ func (ami *Ami) RemoveAmi() error {
 
 	// deregister ami
 	deregisterAmiInput := &ec2.DeregisterImageInput{
-		ImageId: ami.SourceAmiID,
+		ImageId: aws.String(ami.SourceAmiID),
 	}
 
-	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, *ConfigManager.GetDefaultRegion())
+	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, ConfigManager.GetDefaultRegion())
 	_, err = ec2Service.DeregisterImageRequest(deregisterAmiInput).Send()
 
 	if err != nil {

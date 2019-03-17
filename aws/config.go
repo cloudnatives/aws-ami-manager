@@ -76,8 +76,8 @@ func (cm *ConfigurationManager) GetAccountID() *string {
 	return output.Account
 }
 
-func (cm *ConfigurationManager) GetDefaultRegion() *string {
-	return &cm.defaultRegion
+func (cm *ConfigurationManager) GetDefaultRegion() string {
+	return cm.defaultRegion
 }
 
 func (cm *ConfigurationManager) GetDefaultAccountID() *string {
@@ -129,10 +129,12 @@ func (cm *ConfigurationManager) loadConfiguration() {
 }
 
 func (cm *ConfigurationManager) GetConfigurationForDefaultAccount() awsv2.Config {
+	log.Debug("GetConfigurationForDefaultAccount")
 	return cm.getConfigurationForAccount(*cm.defaultAccountID)
 }
 
 func (cm *ConfigurationManager) getConfigurationForAccount(account string) awsv2.Config {
+	log.Debugf("getConfigurationForAccount: account: %s", account)
 	if account == *cm.defaultAccountID {
 		return cm.defaultConfig
 	}
@@ -140,6 +142,7 @@ func (cm *ConfigurationManager) getConfigurationForAccount(account string) awsv2
 }
 
 func (cm *ConfigurationManager) getConfigurationForDefaultAccountAndRegion(region string) awsv2.Config {
+	log.Debugf("getConfigurationForDefaultAccountAndRegion: region: %s", region)
 	config := cm.GetConfigurationForDefaultAccount()
 	config.Region = region
 
@@ -147,6 +150,7 @@ func (cm *ConfigurationManager) getConfigurationForDefaultAccountAndRegion(regio
 }
 
 func (cm *ConfigurationManager) getConfigurationForAccountAndRegion(account string, region string) awsv2.Config {
+	log.Debugf("getConfigurationForAccountAndRegion - Account: %s, Region: %s", account, region)
 	config := cm.getConfigurationForAccount(account)
 	config.Region = region
 

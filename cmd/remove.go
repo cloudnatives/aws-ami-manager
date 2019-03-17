@@ -38,7 +38,7 @@ to quickly create a Cobra application.`,
 func runRemove() {
 	cm := aws.NewConfigurationManager()
 
-	ami := aws.NewAmi(&amiID)
+	ami := aws.NewAmi(amiID)
 	ami.SourceRegion = cm.GetDefaultRegion()
 
 	aws.ConfigManager = cm
@@ -49,7 +49,7 @@ func runRemove() {
 		log.Fatal(err)
 	}
 
-	log.Infof("AMI %s has been removed successfully", *ami.SourceAmiID)
+	log.Infof("AMI %s has been removed successfully", ami.SourceAmiID)
 }
 
 func init() {
