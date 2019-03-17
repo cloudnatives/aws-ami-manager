@@ -13,7 +13,6 @@ type CredentialsProvider struct {
 }
 
 func (s CredentialsProvider) Retrieve() (awsv2.Credentials, error) {
-
 	if s.Credentials == nil {
 		return awsv2.Credentials{}, errors.New("sts credentials are nil")
 	}
