@@ -23,13 +23,11 @@ import (
 // removeCmd represents the remove command
 var removeCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Removes an AMI in your current region",
+	Long: `Removes an AMI in your current region.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+E.g. ./aws-ami-manager remove --amiID=ami-075d87a3d4512bee5
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		runRemove()
 	},
