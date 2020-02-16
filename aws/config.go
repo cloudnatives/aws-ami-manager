@@ -1,11 +1,12 @@
 package aws
 
 import (
-	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"context"
 	"os"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -34,7 +35,7 @@ type ConfigurationManager struct {
 
 	configsPerAccount map[string]awsv2.Config
 
-	stsService *sts.STS
+	stsService *sts.Client
 }
 
 func NewConfigurationManager() *ConfigurationManager {
@@ -55,7 +56,7 @@ func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []s
 	return cm
 }
 
-func (cm *ConfigurationManager) getSTSService() *sts.STS {
+func (cm *ConfigurationManager) getSTSClient() *sts.Client {
 	if cm.stsService == nil {
 		cfg, err := external.LoadDefaultAWSConfig()
 
@@ -68,7 +69,7 @@ func (cm *ConfigurationManager) getSTSService() *sts.STS {
 }
 
 func (cm *ConfigurationManager) GetAccountID() *string {
-	output, err := cm.getSTSService().GetCallerIdentityRequest(&sts.GetCallerIdentityInput{}).Send()
+	output, err := cm.getSTSClient().GetCallerIdentityRequest(&sts.GetCallerIdentityInput{}).Send(context.Background())
 
 	if err != nil {
 		log.Fatal(err)
@@ -103,7 +104,7 @@ func (cm *ConfigurationManager) setDefaults() {
 func (cm *ConfigurationManager) loadConfiguration() {
 	log.Debug("Load configuration")
 
-	svc := cm.getSTSService()
+	svc := cm.getSTSClient()
 
 	for _, account := range cm.accounts {
 		// you cannot assume role in your own account
@@ -115,14 +116,19 @@ func (cm *ConfigurationManager) loadConfiguration() {
 			RoleSessionName: awsv2.String("cli"),
 		}
 
-		output, err := svc.AssumeRoleRequest(input).Send()
+		output, err := svc.AssumeRoleRequest(input).Send(context.Background())
 
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		awsConfig := svc.Config.Copy()
-		awsConfig.Credentials = CredentialsProvider{Credentials: output.Credentials}
+		credentials := output.Credentials
+		awsConfig.Credentials = awsv2.NewStaticCredentialsProvider(
+			*credentials.AccessKeyId,
+			*credentials.SecretAccessKey,
+			*credentials.SessionToken,
+		)
 
 		cm.configsPerAccount[account] = awsConfig
 	}

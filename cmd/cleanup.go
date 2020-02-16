@@ -15,36 +15,53 @@
 package cmd
 
 import (
-	"fmt"
-
+	"github.com/cloudnatives/aws-ami-manager/aws"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
+
+var tagsToMatch []string
 
 // cleanupCmd represents the cleanup command
 var cleanupCmd = &cobra.Command{
 	Use:   "cleanup",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Cleanup earlier versions of the AMI",
+	Long: `Cleanup earlier versions in the different regions. 
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+It keeps the most recent version with the same tags and AMI's that are currently in use.		
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("cleanup called")
+		runCleanup()
 	},
+}
+
+func runCleanup() {
+	cm := aws.NewConfigurationManager()
+
+	ami := aws.NewAmi(amiID)
+	ami.SourceRegion = cm.GetDefaultRegion()
+
+	aws.ConfigManager = cm
+
+	err := ami.Cleanup(regions, tagsToMatch)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Infof("Older AMI's related to %s has been cleaned up successfully", ami.SourceAmiID)
 }
 
 func init() {
 	rootCmd.AddCommand(cleanupCmd)
 
-	// Here you will define your flags and configuration settings.
+	cleanupCmd.Flags().StringVar(&amiID, "amiID", "", "The source AMI ID, e.g. aws-0e38957fc6310ea8b")
+	_ = cleanupCmd.MarkFlagRequired("amiID")
 
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// cleanupCmd.PersistentFlags().String("foo", "", "A help for foo")
+	cleanupCmd.Flags().StringSliceVar(&regions, "regions", []string{}, "The regions to copy this AMI to. Can be multiple flags, or a comma-separated value")
+	_ = cleanupCmd.MarkFlagRequired("regions")
 
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// cleanupCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	cleanupCmd.Flags().StringSliceVar(&tagsToMatch, "tags", []string{}, "The tags to filter the AMI's on. Can be multiple flags, or a comma-separated value")
+	_ = cleanupCmd.MarkFlagRequired("regions")
+
 }

@@ -23,7 +23,6 @@ import (
 )
 
 var (
-	regions  []string
 	accounts []string
 )
 
@@ -63,7 +62,7 @@ func init() {
 	_ = copyCmd.MarkFlagRequired("regions")
 
 	copyCmd.Flags().StringSliceVar(&accounts, "accounts", []string{}, "The account ID's that will be authorized to use the Ami's. Can be multiple flags, or a comma-separated value")
-	_ = copyCmd.MarkFlagRequired("regions")
+	_ = copyCmd.MarkFlagRequired("accounts")
 }
 
 func loadAWSConfigForProfiles() {
