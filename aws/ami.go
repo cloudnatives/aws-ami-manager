@@ -263,7 +263,7 @@ func createLaunchPermissionsForOwners(owners []string) []ec2.LaunchPermission {
 	return launchPermissions
 }
 
-func (ami *Ami) Cleanup(regions []string, tagsToMatch []string) error {
+func (ami *Ami) Cleanup(regions []string, tagsToMatch []string, versionsToKeep int) error {
 	// describe ami
 	err := ami.fetchMetadata()
 
@@ -317,7 +317,7 @@ func (ami *Ami) Cleanup(regions []string, tagsToMatch []string) error {
 		var i = 0
 		for _, image := range images {
 			// keep the first (i.e. most recent) AMI
-			if i > 0 {
+			if i >= versionsToKeep {
 				log.Debugf("Deleting image %s", *image.ImageId)
 				err = removeAwsAmi(&image, ec2svc)
 				log.Infof("Image %s deleted", *image.ImageId)

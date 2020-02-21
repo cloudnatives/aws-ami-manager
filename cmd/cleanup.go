@@ -20,7 +20,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var tagsToMatch []string
+var (
+	tagsToMatch    []string
+	versionsToKeep int
+)
 
 // cleanupCmd represents the cleanup command
 var cleanupCmd = &cobra.Command{
@@ -43,7 +46,7 @@ func runCleanup() {
 
 	aws.ConfigManager = cm
 
-	err := ami.Cleanup(regions, tagsToMatch)
+	err := ami.Cleanup(regions, tagsToMatch, versionsToKeep)
 
 	if err != nil {
 		log.Fatal(err)
@@ -64,4 +67,5 @@ func init() {
 	cleanupCmd.Flags().StringSliceVar(&tagsToMatch, "tags", []string{}, "The tags to filter the AMI's on. Can be multiple flags, or a comma-separated value")
 	_ = cleanupCmd.MarkFlagRequired("regions")
 
+	cleanupCmd.Flags().IntVar(&versionsToKeep, "versions-to-keep", 5, "The number of AMI's you would like to keep. Defaults to 5.")
 }
