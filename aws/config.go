@@ -36,6 +36,8 @@ type ConfigurationManager struct {
 	configsPerAccount map[string]awsv2.Config
 
 	stsService *sts.Client
+
+	role string
 }
 
 func NewConfigurationManager() *ConfigurationManager {
@@ -44,6 +46,7 @@ func NewConfigurationManager() *ConfigurationManager {
 
 	return cm
 }
+
 func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []string) *ConfigurationManager {
 	cm := &ConfigurationManager{
 		regions:  regions,
@@ -107,12 +110,12 @@ func (cm *ConfigurationManager) loadConfiguration() {
 	svc := cm.getSTSClient()
 
 	for _, account := range cm.accounts {
-		// you cannot assume role in your own account
+		// you shouldn't assume role in your own account. We expect this user to have sufficient permissions
 		if account == *cm.defaultAccountID {
 			continue
 		}
 		input := &sts.AssumeRoleInput{
-			RoleArn:         awsv2.String("arn:aws:iam::" + account + ":role/OrganizationAccountAccessRole"),
+			RoleArn:         awsv2.String("arn:aws:iam::" + account + ":role/" + cm.role),
 			RoleSessionName: awsv2.String("cli"),
 		}
 

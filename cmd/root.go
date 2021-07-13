@@ -16,9 +16,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/cloudnatives/aws-ami-manager/aws"
 	"github.com/sirupsen/logrus"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,7 @@ var (
 	logLevel string
 	amiID    string
 	regions  []string
+	role     string
 )
 
 // rootCmd represents the base command when called without any subcommands
