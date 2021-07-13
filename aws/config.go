@@ -47,10 +47,11 @@ func NewConfigurationManager() *ConfigurationManager {
 	return cm
 }
 
-func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []string) *ConfigurationManager {
+func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []string, role string) *ConfigurationManager {
 	cm := &ConfigurationManager{
 		regions:  regions,
 		accounts: accounts,
+		role: role,
 	}
 
 	cm.setDefaults()
