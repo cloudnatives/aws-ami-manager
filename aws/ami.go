@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,7 +26,7 @@ func getEC2ServiceForAccountAndRegion(account string, region string) *ec2.Client
 	}
 
 	if ec2Services[account][region] == nil {
-		ec2Services[account][region] = ec2.New(ConfigManager.getConfigurationForAccountAndRegion(account, region))
+		ec2Services[account][region] = ec2.NewFromConfig(ConfigManager.getConfigurationForAccountAndRegion(account, region))
 	}
 	return ec2Services[account][region]
 }
@@ -34,8 +35,8 @@ type Ami struct {
 	SourceAmiID   string
 	SourceRegion  string
 	SourceAmiName string
-	SourceAmiTags *[]ec2.Tag
-	AWSImage      *ec2.Image
+	SourceAmiTags *[]ec2Types.Tag
+	AWSImage      *ec2Types.Image
 
 	AmisPerRegion map[string]*Ami
 }
@@ -66,8 +67,7 @@ func (ami *Ami) fetchMetadata() error {
 	describeImagesInput := ec2.DescribeImagesInput{
 		ImageIds: amiList,
 	}
-	request := ec2svc.DescribeImagesRequest(&describeImagesInput)
-	result, err := request.Send(context.Background())
+	result, err := ec2svc.DescribeImages(context.Background(), &describeImagesInput)
 
 	if err != nil {
 		return err
@@ -165,8 +165,7 @@ func (ami *Ami) copyToRegion(region string) (*Ami, error) {
 	}
 	ec2Service := getEC2ServiceForAccountAndRegion(*ConfigManager.defaultAccountID, relatedAmi.SourceRegion)
 
-	copyImageRequest := ec2Service.CopyImageRequest(copyImageInput)
-	output, err := copyImageRequest.Send(context.Background())
+	output, err := ec2Service.CopyImage(context.Background(), copyImageInput)
 
 	if err != nil {
 		log.Debug(err)
@@ -204,13 +203,12 @@ func (ami *Ami) setOwners(owners []string) error {
 
 	modifyImageAttributeInput := &ec2.ModifyImageAttributeInput{
 		ImageId: aws.String(ami.SourceAmiID),
-		LaunchPermission: &ec2.LaunchPermissionModifications{
+		LaunchPermission: &ec2Types.LaunchPermissionModifications{
 			Add: createLaunchPermissionsForOwners(owners),
 		},
 	}
 
-	modifyImageAttributeRequest := ec2Service.ModifyImageAttributeRequest(modifyImageAttributeInput)
-	_, err := modifyImageAttributeRequest.Send(context.Background())
+	_, err := ec2Service.ModifyImageAttribute(context.Background(), modifyImageAttributeInput)
 
 	log.Debugf("Owners set for AMI %s", ami.SourceAmiID)
 
@@ -223,10 +221,10 @@ func (ami *Ami) isAvailable() bool {
 	}
 
 	log.Debugf("Current AMI state is %s", ami.AWSImage.State)
-	return ami.AWSImage.State == ec2.ImageStateAvailable
+	return ami.AWSImage.State == ec2Types.ImageStateAvailable
 }
 
-func (ami *Ami) setTagsForAccount(account string, tags []ec2.Tag) error {
+func (ami *Ami) setTagsForAccount(account string, tags []ec2Types.Tag) error {
 	log.Infof("Setting tags for account %s", account)
 	log.Debug(ami)
 	ec2service := getEC2ServiceForAccountAndRegion(account, ami.SourceRegion)
@@ -236,8 +234,7 @@ func (ami *Ami) setTagsForAccount(account string, tags []ec2.Tag) error {
 		Tags:      tags,
 	}
 
-	request := ec2service.CreateTagsRequest(input)
-	_, err := request.Send(context.Background())
+	_, err := ec2service.CreateTags(context.Background(), input)
 
 	return err
 }
@@ -253,10 +250,10 @@ func convertRegionSliceToAmi(slice []string) map[string]*Ami {
 	return amis
 }
 
-func createLaunchPermissionsForOwners(owners []string) []ec2.LaunchPermission {
-	launchPermissions := make([]ec2.LaunchPermission, len(owners))
+func createLaunchPermissionsForOwners(owners []string) []ec2Types.LaunchPermission {
+	launchPermissions := make([]ec2Types.LaunchPermission, len(owners))
 	for _, owner := range owners {
-		launchPermissions = append(launchPermissions, ec2.LaunchPermission{
+		launchPermissions = append(launchPermissions, ec2Types.LaunchPermission{
 			UserId: aws.String(owner),
 		})
 	}
@@ -275,7 +272,7 @@ func (ami *Ami) Cleanup(regions []string, tagsToMatch []string, versionsToKeep i
 	tags := convertTagSliceToMap(ami.AWSImage.Tags)
 
 	// get the tags we need to match with
-	var matchedTags []ec2.Tag
+	var matchedTags []ec2Types.Tag
 	for _, tagToMatch := range tagsToMatch {
 		if match, ok := tags[tagToMatch]; ok {
 			matchedTags = append(matchedTags, match)
@@ -288,8 +285,7 @@ func (ami *Ami) Cleanup(regions []string, tagsToMatch []string, versionsToKeep i
 		describeImagesInput := ec2.DescribeImagesInput{
 			Filters: convertTagSliceToFilter(matchedTags),
 		}
-		request := ec2svc.DescribeImagesRequest(&describeImagesInput)
-		result, err := request.Send(context.Background())
+		result, err := ec2svc.DescribeImages(context.Background(), &describeImagesInput)
 
 		if err != nil {
 			log.Fatal(err)
@@ -351,13 +347,13 @@ func (ami *Ami) RemoveAmi() error {
 	return nil
 }
 
-func removeAwsAmi(image *ec2.Image, ec2Service *ec2.Client) error {
+func removeAwsAmi(image *ec2Types.Image, ec2Service *ec2.Client) error {
 	// deregister ami
 	deregisterAmiInput := &ec2.DeregisterImageInput{
 		ImageId: image.ImageId,
 	}
 
-	_, err := ec2Service.DeregisterImageRequest(deregisterAmiInput).Send(context.Background())
+	_, err := ec2Service.DeregisterImage(context.Background(), deregisterAmiInput)
 
 	if err != nil {
 		log.Fatal(err)
@@ -371,7 +367,7 @@ func removeAwsAmi(image *ec2.Image, ec2Service *ec2.Client) error {
 			SnapshotId: mapping.Ebs.SnapshotId,
 		}
 
-		_, err := ec2Service.DeleteSnapshotRequest(deleteSnapshotInput).Send(context.Background())
+		_, err := ec2Service.DeleteSnapshot(context.Background(), deleteSnapshotInput)
 
 		if err != nil {
 			return err
@@ -383,8 +379,8 @@ func removeAwsAmi(image *ec2.Image, ec2Service *ec2.Client) error {
 	return nil
 }
 
-func convertTagSliceToMap(tagSlice []ec2.Tag) map[string]ec2.Tag {
-	tagMap := make(map[string]ec2.Tag)
+func convertTagSliceToMap(tagSlice []ec2Types.Tag) map[string]ec2Types.Tag {
+	tagMap := make(map[string]ec2Types.Tag)
 	if len(tagSlice) > 0 {
 		for _, tag := range tagSlice {
 			tagMap[*tag.Key] = tag
@@ -393,8 +389,8 @@ func convertTagSliceToMap(tagSlice []ec2.Tag) map[string]ec2.Tag {
 	return tagMap
 }
 
-func convertTagSliceToFilter(tags []ec2.Tag) []ec2.Filter {
-	tagsFilter := make([]ec2.Filter, len(tags))
+func convertTagSliceToFilter(tags []ec2Types.Tag) []ec2Types.Filter {
+	tagsFilter := make([]ec2Types.Filter, len(tags))
 
 	for key, tag := range tags {
 		tagsFilter[key] = convertTagToFilter(tag)
@@ -403,13 +399,13 @@ func convertTagSliceToFilter(tags []ec2.Tag) []ec2.Filter {
 	return tagsFilter
 }
 
-func convertTagToFilter(tag ec2.Tag) ec2.Filter {
+func convertTagToFilter(tag ec2Types.Tag) ec2Types.Filter {
 	name := "tag:" + *tag.Key
 	values := make([]string, 1)
 
 	values = append(values, *tag.Value)
 
-	return ec2.Filter{
+	return ec2Types.Filter{
 		Name:   &name,
 		Values: values,
 	}

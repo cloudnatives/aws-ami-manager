@@ -4,11 +4,11 @@ import (
 	"errors"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
+	stsTypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 )
 
 type CredentialsProvider struct {
-	*sts.Credentials
+	*stsTypes.Credentials
 }
 
 func (s CredentialsProvider) Retrieve() (awsv2.Credentials, error) {
@@ -17,9 +17,9 @@ func (s CredentialsProvider) Retrieve() (awsv2.Credentials, error) {
 	}
 
 	return awsv2.Credentials{
-		AccessKeyID:     awsv2.StringValue(s.AccessKeyId),
-		SecretAccessKey: awsv2.StringValue(s.SecretAccessKey),
-		SessionToken:    awsv2.StringValue(s.SessionToken),
-		Expires:         awsv2.TimeValue(s.Expiration),
+		AccessKeyID:     *s.AccessKeyId,
+		SecretAccessKey: *s.SecretAccessKey,
+		SessionToken:    *s.SessionToken,
+		Expires:         *s.Expiration,
 	}, nil
 }
