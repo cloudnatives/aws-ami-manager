@@ -2,10 +2,11 @@ package aws
 
 import (
 	"context"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"os"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	log "github.com/sirupsen/logrus"
 )
@@ -35,50 +36,55 @@ type ConfigurationManager struct {
 
 	configsPerAccount map[string]awsv2.Config
 
-	stsService *sts.Client
-
 	role string
 }
 
 func NewConfigurationManager() *ConfigurationManager {
-	cm := &ConfigurationManager{}
-	cm.setDefaults()
-
-	return cm
+	return NewConfigurationManagerForRegionsAndAccounts(make([]string, 0), make([]string, 0), "")
 }
 
 func NewConfigurationManagerForRegionsAndAccounts(regions []string, accounts []string, role string) *ConfigurationManager {
 	cm := &ConfigurationManager{
 		regions:  regions,
 		accounts: accounts,
-		role: role,
+		role:     role,
 	}
 
-	cm.setDefaults()
-	cm.loadConfiguration()
-
-	return cm
-}
-
-func (cm *ConfigurationManager) getSTSClient() *sts.Client {
-	if cm.stsService == nil {
-		cfg, err := external.LoadDefaultAWSConfig()
-
-		if err != nil {
-			log.Fatal(err)
-		}
-		cm.stsService = sts.New(cfg)
-	}
-	return cm.stsService
-}
-
-func (cm *ConfigurationManager) GetAccountID() *string {
-	output, err := cm.getSTSClient().GetCallerIdentityRequest(&sts.GetCallerIdentityInput{}).Send(context.Background())
+	log.Debug("Setting defaults")
+	conf, err := config.LoadDefaultConfig(context.TODO())
 
 	if err != nil {
-		log.Fatal(err)
+		panic("unable to load SDK config, " + err.Error())
 	}
-	return output.Account
+
+	cm.defaultConfig = conf
+	cm.defaultProfile = os.Getenv(ProfileString)
+	cm.defaultRegion = conf.Region
+
+	stsService := sts.NewFromConfig(conf)
+
+	defaultAccountID, err := stsService.GetCallerIdentity(context.TODO(), &sts.GetCallerIdentityInput{})
+	if err != nil {
+		panic("unable to load defaultAccountId, " + err.Error())
+	}
+
+	cm.defaultAccountID = defaultAccountID.Account
+
+	cm.configsPerAccount = make(map[string]awsv2.Config)
+	for _, account := range cm.accounts {
+		// you shouldn't assume role in your own account. We expect this user to have sufficient permissions
+		if account == *cm.defaultAccountID {
+			continue
+		}
+
+		confCopy := conf.Copy()
+
+		confCopy.Credentials = stscreds.NewAssumeRoleProvider(stsService, "arn:aws:iam::"+account+":role/"+cm.role)
+
+		cm.configsPerAccount[account] = confCopy
+	}
+
+	return cm
 }
 
 func (cm *ConfigurationManager) GetDefaultRegion() string {
@@ -89,53 +95,9 @@ func (cm *ConfigurationManager) GetDefaultAccountID() *string {
 	return cm.defaultAccountID
 }
 
-func (cm *ConfigurationManager) setDefaults() {
-	log.Debug("Setting defaults")
-	config, err := external.LoadDefaultAWSConfig()
-
-	if err != nil {
-		panic("unable to load SDK config, " + err.Error())
-	}
-
-	cm.defaultConfig = config
-	cm.defaultProfile = os.Getenv(ProfileString)
-	cm.defaultRegion = config.Region
-	cm.defaultAccountID = cm.GetAccountID()
-
-	cm.configsPerAccount = make(map[string]awsv2.Config)
-}
-
 func (cm *ConfigurationManager) loadConfiguration() {
 	log.Debug("Load configuration")
 
-	svc := cm.getSTSClient()
-
-	for _, account := range cm.accounts {
-		// you shouldn't assume role in your own account. We expect this user to have sufficient permissions
-		if account == *cm.defaultAccountID {
-			continue
-		}
-		input := &sts.AssumeRoleInput{
-			RoleArn:         awsv2.String("arn:aws:iam::" + account + ":role/" + cm.role),
-			RoleSessionName: awsv2.String("cli"),
-		}
-
-		output, err := svc.AssumeRoleRequest(input).Send(context.Background())
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		awsConfig := svc.Config.Copy()
-		credentials := output.Credentials
-		awsConfig.Credentials = awsv2.NewStaticCredentialsProvider(
-			*credentials.AccessKeyId,
-			*credentials.SecretAccessKey,
-			*credentials.SessionToken,
-		)
-
-		cm.configsPerAccount[account] = awsConfig
-	}
 }
 
 func (cm *ConfigurationManager) GetConfigurationForDefaultAccount() awsv2.Config {
@@ -161,10 +123,10 @@ func (cm *ConfigurationManager) getConfigurationForDefaultAccountAndRegion(regio
 
 func (cm *ConfigurationManager) getConfigurationForAccountAndRegion(account string, region string) awsv2.Config {
 	log.Debugf("getConfigurationForAccountAndRegion - Account: %s, Region: %s", account, region)
-	config := cm.getConfigurationForAccount(account)
-	config.Region = region
+	conf := cm.getConfigurationForAccount(account)
+	conf.Region = region
 
-	return config
+	return conf
 }
 
 func (cm *ConfigurationManager) getAccounts() []string {
